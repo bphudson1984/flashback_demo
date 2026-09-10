@@ -21,7 +21,7 @@ COPY public/ public/
 ENV ZIG_BINARY=/opt/zig/zig
 RUN bash tools/build.sh && node tools/test.mjs && node tools/render.mjs
 
-FROM nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+FROM nginx:1.31-alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /app/public/ /usr/share/nginx/html/
 USER nginx
