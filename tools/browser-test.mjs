@@ -1,0 +1,28 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const artifacts=path.join(root,'artifacts',process.env.LAB_EXPECT_BACKEND||'browser');
+fs.mkdirSync(artifacts,{recursive:true});
+const env={...process.env};
+if(fs.existsSync(path.join(root,'tools/fonts.conf')))env.FONTCONFIG_FILE=path.join(root,'tools/fonts.conf');
+if(fs.existsSync(path.join(root,'tools/browser-libs/usr/lib/x86_64-linux-gnu')))env.LD_LIBRARY_PATH=path.join(root,'tools/browser-libs/usr/lib/x86_64-linux-gnu');
+const args=['--no-sandbox','--autoplay-policy=no-user-gesture-required'];
+if(process.env.LAB_HOST_RESOLVER)args.push('--host-resolver-rules='+process.env.LAB_HOST_RESOLVER,'--no-proxy-server');
+const browser=await chromium.launch({headless:true,env,args});
+const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+await page.goto(process.env.LAB_TEST_URL||'http://127.0.0.1:18742');await page.waitForSelector('.demo-card');assert.equal(await page.locator('.demo-card').count(),8);assert.equal(await page.locator('#shape option').count(),47);
+await page.click('#power');await page.waitForFunction(()=>window.lab.context?.state==='running');await page.click('#play');await page.waitForFunction(()=>document.getElementById('meterLabel').textContent!=='−∞ dBFS');await page.waitForTimeout(1500);if(process.env.LAB_EXPECT_BACKEND){assert.equal(await page.evaluate(()=>lab.node.backend),process.env.LAB_EXPECT_BACKEND);assert.equal(await page.evaluate(()=>isSecureContext),process.env.LAB_EXPECT_BACKEND==='worklet');}
+await page.evaluate(()=>{window.testAnalyser=lab.context.createAnalyser();lab.node.connect(testAnalyser);});await page.waitForTimeout(100);const peak=await page.evaluate(async()=>{let peak=0;for(let i=0;i<12;i++){const a=new Float32Array(testAnalyser.fftSize);testAnalyser.getFloatTimeDomainData(a);for(const n of a){if(!Number.isFinite(n))throw Error('Non-finite output');peak=Math.max(peak,Math.abs(n));}await new Promise(r=>setTimeout(r,50));}return peak;});assert(peak>.0001,'Actual Web Audio output must contain sound');console.log('output peak',peak);console.log('audio meter',await page.locator('#meterLabel').textContent());assert.notEqual(await page.locator('#audioStatus').textContent(),'AUDIO ERROR');
+await page.click('#stop');await page.click('#hearDry');assert.equal(await page.evaluate(()=>lab.patch.enabled),0);await page.click('#hearWet');assert.equal(await page.evaluate(()=>lab.patch.killDry),1);await page.click('#hearFull');
+await page.locator('.demo-card').nth(2).click();await page.click('#play');await page.waitForTimeout(2500);console.log('pad meter',await page.locator('#meterLabel').textContent());await page.click('#stop');
+await page.selectOption('#algorithm','6');assert.equal(await page.evaluate(()=>lab.patch.algorithm),6);await page.click('#store');await page.click('#bank');assert.match(await page.locator('#bank').textContent(),/BANK 2/);
+await page.click('#saveRecipe');await page.selectOption('#algorithm','7');await page.click('#loadRecipe');assert.equal(await page.evaluate(()=>lab.patch.algorithm),6);
+await page.click('#panic');await page.keyboard.press('a');await page.waitForTimeout(100);assert.equal(await page.locator('.key.down').count(),0);
+await page.click('[data-loop="rec"]');await page.waitForTimeout(350);await page.click('[data-loop="rec"]');await page.waitForFunction(()=>document.getElementById('loopStatus').textContent.startsWith('PLAYING'));await page.click('[data-loop="once"]');await page.waitForFunction(()=>document.getElementById('loopStatus').textContent.startsWith('PAUSED'));await page.click('[data-loop="clear"]');
+await page.evaluate(()=>lab.loadDemo(0));await page.screenshot({path:path.join(artifacts,'desktop.png'),fullPage:true});
+const download=page.waitForEvent('download',{timeout:120000});await page.click('#export');await page.waitForFunction(()=>document.getElementById('export').textContent==='↓ Download WAV',{},{timeout:60000});await page.click('#export');const file=await download;await file.saveAs(path.join(artifacts,'browser-export.wav'));assert(fs.statSync(path.join(artifacts,'browser-export.wav')).size>100000);
+await page.setViewportSize({width:390,height:844});await page.screenshot({path:path.join(artifacts,'mobile.png'),fullPage:true});const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);assert.equal(overflow,false,'mobile horizontal overflow');
+assert.deepEqual(errors,[]);fs.writeFileSync(path.join(artifacts,'results.json'),JSON.stringify({date:new Date().toISOString(),browser:'Chromium',passed:true,backend:await page.evaluate(()=>lab.node.backend),testedURL:process.env.LAB_TEST_URL||'http://127.0.0.1:18742',actualOutputPeak:peak,exportWav:true,mobileWidth:390,horizontalOverflow:overflow,errors},null,2));console.log('PASS browser audio, presets, audition, looper, export, mobile layout');await browser.close();

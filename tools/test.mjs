@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {Engine,Delay,SR} from '../public/dsp.js';
+import {defaults,shapes,algorithms} from '../public/presets.js';
+const bytes=fs.readFileSync(new URL('../public/braids.wasm',import.meta.url));
+const module=await WebAssembly.compile(bytes);
+const make=()=>new Engine(new WebAssembly.Instance(module,{}));
+const results=[];
+function test(name,fn){fn();results.push({name,passed:true});console.log('PASS',name);}
+test('Braids contains no system or network imports',()=>assert.deepEqual(WebAssembly.Module.imports(module),[]));
+test('All 47 Braids models render finite non-silent audio',()=>{for(const [shape,name]of shapes){const e=make();e.set({...defaults,shape,enabled:0,buffered:0,cutoff:12000,envAmount:0});e.noteOn(60,.8,1);let peak=0;for(let i=0;i<SR;i++){const o=e.next();assert(Number.isFinite(o[0]));peak=Math.max(peak,Math.abs(o[0]));}assert(peak>.00001,`${name}: silent`);}});
+test('Braids sine A4 is within 1 Hz of 440 Hz',()=>{const e=make();e.set({shape:3,timbre:0,color:0,mod1Amount:0,mod2Amount:0,mod3Amount:0,mod4Amount:0,cutoff:15000,drive:1,envAmount:0,enabled:0,buffered:0,attack:.002,decay:.02,sustain:1});e.noteOn(69,1);let last=0,crossings=0;for(let i=0;i<SR*2;i++){const x=e.next()[0];if(i>=SR&&last<=0&&x>0)crossings++;last=x;}assert(Math.abs(crossings-440)<=1,`frequency: ${crossings}`);});
+test('2290 impulse: exact delay, geometric feedback, independent stereo',()=>{const d=new Delay(),p={...defaults,algorithm:0,time:100,sync:0,feedback:.5,level:1};d.level=1;d.fb=.5;for(let i=0;i<=14400;i++){const y=d.next(i===0?.5:0,0,p,i/SR);if(i===4800)assert(Math.abs(y[0]-.5)<1e-7);if(i===9600)assert(Math.abs(y[0]-.25)<1e-7);if(i===14400)assert(Math.abs(y[0]-.125)<1e-7);assert.equal(y[1],0);}});
+test('Ping-pong impulse alternates left then right',()=>{const d=new Delay(),p={...defaults,algorithm:8,time:100,sync:0,feedback:.5,level:1};d.level=1;d.fb=.5;for(let i=0;i<=9600;i++){const y=d.next(i===0?.5:0,i===0?.5:0,p,i/SR);if(i===4800){assert(Math.abs(y[0]-.5)<1e-7);assert.equal(y[1],0);}if(i===9600){assert.equal(y[0],0);assert(Math.abs(y[1]-.25)<1e-7);}}});
+test('Dry path is not attenuated by delay level',()=>{const a=make(),b=make();a.set({level:0,master:1});b.set({level:1.2,master:1});for(let i=0;i<480;i++){assert.equal(a.next(.1,.2)[0],b.next(.1,.2)[0]);}});
+test('Kill-dry removes the direct impulse',()=>{const e=make();e.set({killDry:1});assert.equal(e.next(.5,.5)[0],0);});
+test('True bypass clears trails; buffered bypass preserves them',()=>{for(const buffered of [0,1]){const e=make();e.set({algorithm:0,time:100,sync:0,level:1,feedback:.5,buffered});e.next(.5,.5);for(let i=1;i<2400;i++)e.next();e.set({enabled:0});let peak=0;for(let i=2400;i<10000;i++)peak=Math.max(peak,Math.abs(e.next()[0]));assert(buffered?peak>.1:peak===0);}});
+test('Crystal doubles a steady sine on its first pass',()=>{const d=new Delay(),p={...defaults,algorithm:5,time:100,sync:0,level:1,feedback:0};d.level=1;let prev=0,cross=0;for(let i=0;i<SR*2;i++){const o=d.next(.1*Math.sin(2*Math.PI*400*i/SR),0,p,i/SR)[0];if(i>=SR&&prev<=0&&o>0)cross++;prev=o;}assert(Math.abs(cross-800)<3,`frequency: ${cross}`);});
+test('All delay modes remain finite at maximum feedback and MASH',()=>{for(let algorithm=0;algorithm<9;algorithm++){const d=new Delay(),p={...defaults,algorithm,sync:0,time:35,feedback:.95,mash:1,level:1.2};for(let i=0;i<SR;i++){const o=d.next(i<100?.1:0,0,p,i/SR);assert(Number.isFinite(o[0])&&Math.abs(o[0])<10,algorithms[algorithm]);}}});
+test('Looper records, overdubs, undoes, redoes, plays once and clears',()=>{const e=make(),L=e.looper;L.command('rec');for(let i=0;i<480;i++)L.next(.1,.2,1);L.command('rec');assert.equal(L.length,480);L.next(0,0,1);assert(Math.abs(L.outL-.1)<1e-6);L.command('rec');for(let i=0;i<480;i++)L.next(.1,.2,1);L.command('rec');L.command('undo');L.next(0,0,1);assert(Math.abs(L.outL-.1)<1e-6);L.command('undo');L.next(0,0,1);assert(Math.abs(L.outL-.2)<1e-6);L.command('once');for(let i=0;i<480;i++)L.next(0,0,1);assert.equal(L.state,'paused');L.command('clear');assert.equal(L.length,0);});
+test('Looper stereo and mono limits are 20 and 40 seconds',()=>{const e=make();e.looper.command('rec',false);assert.equal(e.looper.limit,SR*20);e.looper.clear();e.looper.command('rec',true);assert.equal(e.looper.limit,SR*40);});
+fs.writeFileSync(new URL('../public/test-results.json',import.meta.url),JSON.stringify({date:new Date().toISOString(),tests:results},null,2));

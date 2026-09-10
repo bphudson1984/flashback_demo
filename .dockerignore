@@ -1,0 +1,17 @@
+**
+!Dockerfile
+!docker/
+!docker/nginx.conf
+!src/
+!src/**
+!tools/
+!tools/build.sh
+!tools/test.mjs
+!tools/render.mjs
+!public/
+!public/**
+public/demos/
+public/*-offline.html
+public/standalone.html
+public/braids.wasm
+public/*test-results.json

@@ -1,0 +1,3 @@
+import {Engine,SR} from './dsp.js';
+import {wavBuffer} from './audio-utils.js';
+self.onmessage=async({data})=>{try{const bytes=await(await fetch('braids.wasm')).arrayBuffer();const {instance}=await WebAssembly.instantiate(bytes,{});const e=new Engine(instance);e.loadDemo(data.demo);e.set({...data.patch,loopMode:0});e.start();const playing=32*30/e.p.bpm,seconds=playing+Math.max(8,Math.min(22,e.p.time/1000*6)),n=Math.floor(seconds*SR),l=new Float32Array(n),r=new Float32Array(n);for(let i=0;i<n;i++){if(i===Math.floor(playing*SR))e.stop();const o=e.next();l[i]=o[0];r[i]=o[1];if(i%48000===0)self.postMessage({progress:i/n});}const wav=wavBuffer(l,r);self.postMessage({wav},[wav]);}catch(e){self.postMessage({error:e.message});}};

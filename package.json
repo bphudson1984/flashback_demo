@@ -1,0 +1,15 @@
+{
+  "name": "flashback-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tools/test.mjs",
+    "render": "node tools/render.mjs",
+    "start": "python3 -m http.server 8080 --directory public",
+    "test:browser": "node tools/browser-test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
